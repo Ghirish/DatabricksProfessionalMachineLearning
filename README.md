@@ -1,4 +1,4 @@
-# Databricks Machine Learning Engineer Certification Project
+# Databricks Machine Learning Engineer Certification Prep
 
 This project demonstrates my proficiency in key concepts required for the Databricks Machine Learning Engineer certification. The repository is organized to showcase hands-on implementations of the topics outlined in the certification syllabus, including data management, experiment tracking, model lifecycle management, model deployment, and solution/data monitoring.
 
