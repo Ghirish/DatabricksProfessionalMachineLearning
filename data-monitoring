@@ -1,0 +1,105 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from scipy.stats import ks_2samp
+import mlflow
+import mlflow.sklearn
+
+df = pd.read_csv('/dbfs/path/to/dataset.csv')
+df = df[["Pclass", "Age", "Fare", "Survived"]].fillna(0)
+
+X = df[["Pclass", "Age", "Fare"]]
+y = df["Survived"]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Step 1: Train a Baseline Model
+baseline_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+baseline_model.fit(X_train, y_train)
+
+with mlflow.start_run() as run:
+    mlflow.sklearn.log_model(baseline_model, "baseline_random_forest_model")
+    mlflow.log_param("n_estimators", 100)
+    mlflow.log_param("max_depth", 5)
+
+# Step 2: Monitor for Feature Drift using Kolmogorov-Smirnov Test
+
+def detect_feature_drift(train_data, new_data, feature_name):
+    """
+    Detects drift between two datasets for a specific feature using the Kolmogorov-Smirnov test.
+    """
+    ks_stat, p_value = ks_2samp(train_data[feature_name], new_data[feature_name])
+    
+    if p_value < 0.05:
+        print(f"Feature {feature_name} has drifted (p-value={p_value}).")
+    else:
+        print(f"Feature {feature_name} has not drifted (p-value={p_value}).")
+
+new_data = X_test.copy()
+new_data["Age"] = new_data["Age"] + np.random.normal(0, 5, size=new_data.shape[0])  # Simulate drift in the 'Age' feature
+
+detect_feature_drift(X_train, new_data, "Age")
+detect_feature_drift(X_train, new_data, "Fare")
+
+# Step 3: Monitor for Label Drift
+
+def detect_label_drift(train_labels, new_labels):
+    """
+    Detects label drift by comparing label distributions.
+    """
+    unique_labels_train, counts_train = np.unique(train_labels, return_counts=True)
+    unique_labels_new, counts_new = np.unique(new_labels, return_counts=True)
+    
+    distribution_train = counts_train / len(train_labels)
+    distribution_new = counts_new / len(new_labels)
+    
+    drift_detected = not np.allclose(distribution_train, distribution_new, atol=0.1)
+    
+    if drift_detected:
+        print("Label drift detected.")
+    else:
+        print("No label drift detected.")
+        
+new_labels = np.random.choice([0, 1], size=len(y_test), p=[0.6, 0.4])
+detect_label_drift(y_train, new_labels)
+
+# Step 4: Concept Drift Detection and Retraining
+def detect_concept_drift(baseline_model, new_data, new_labels):
+    """
+    Detects concept drift by evaluating the model's performance on new data.
+    """
+    predictions = baseline_model.predict(new_data)
+    accuracy = accuracy_score(new_labels, predictions)
+    
+    print(f"Model accuracy on new data: {accuracy}")
+    
+    # If the accuracy drops significantly compared to baseline, retraining might be needed
+    if accuracy < 0.7:  # Arbitrary threshold for demo purposes
+        print("Concept drift detected. Retraining model...")
+        retrain_model(new_data, new_labels)
+    else:
+        print("No concept drift detected.")
+        
+# Function to retrain the model
+def retrain_model(new_data, new_labels):
+    """
+    Retrains the model using new data and registers the updated model in the Model Registry.
+    """
+    # Train a new model with updated data
+    updated_model = RandomForestClassifier(n_estimators=100, max_depth=5)
+    updated_model.fit(new_data, new_labels)
+    
+    # Log the retrained model using MLflow
+    with mlflow.start_run() as run:
+        mlflow.sklearn.log_model(updated_model, "updated_random_forest_model")
+        mlflow.log_param("n_estimators", 100)
+        mlflow.log_param("max_depth", 5)
+        
+        # Register the updated model in the Model Registry
+        mlflow.register_model("runs:/{}/updated_random_forest_model".format(run.info.run_id), "RandomForestDeploymentModel")
+        
+    print("Model retrained and registered successfully.")
+
+detect_concept_drift(baseline_model, new_data, new_labels)
